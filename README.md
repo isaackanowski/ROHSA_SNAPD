@@ -6,3 +6,5 @@ The code utilises kinematic regularisation to forward model the intrinsic emissi
 ROHSA-SNAPD builds upon the core features of [ROHSA](https://github.com/antoinemarchal/ROHSA) developed by Antoine Marchal.
 
 For more information about the code and acknowledgements, see the upcoming paper Kanowski et al. (in prep).
+
+If you have any questions, comments or suggestions, please contact me [here](mailto:Isaac.Kanowski@anu.edu.au).
