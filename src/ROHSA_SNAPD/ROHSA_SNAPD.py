@@ -30,6 +30,7 @@ def minimiser_callback(xk):
 def fit(fits_path, lambda_flux, lambda_mu, lambda_sig, raveled_init_param_maps,
         sigma_LSF_channels=0., tol=1e-6, max_its=1e7,
         bounds_flux=(1e-6, 1000.0), bounds_mu=(1e-6, 10.), bounds_sigma=(1e-6, 10.),oversample_factor=4,use_Cauchy_likelihood=False,
+        skyline_mask=None,spatial_mask=None,
         save_param_history=False):
     """
     The main fitting code
@@ -59,6 +60,8 @@ def fit(fits_path, lambda_flux, lambda_mu, lambda_sig, raveled_init_param_maps,
     :param oversample_factor: The factor by which to oversample the parameter maps when
                         calculating the cost function to account for pixelisation
     :param use_Cauchy_likelihood: Whether to use a negative log Cauchy distribution in the cost function, or if False, chi-sqrd
+    :param skyline_mask: A 1D bool array with len(skyline_mask) == n spectral channels, where True is to remove from the L(theta) calculation (or None if no masking).
+    :param spatial_mask: A ravelled bool array which when resized is a 2D map of regions to be masked, where True is to remove from the L(theta) calculation (or None if no masking).
     :param save_param_history: If True, the optimiser results are stored for each iteration and are saved at the end.
     """
 
@@ -87,7 +90,8 @@ def fit(fits_path, lambda_flux, lambda_mu, lambda_sig, raveled_init_param_maps,
                                        psf_im.astype(np.float64),
                                        lambda_flux, lambda_mu, lambda_sig,
                                        kernel.astype(np.float64),
-                                       sigma_LSF_channels, oversample_factor, use_Cauchy_likelihood
+                                       sigma_LSF_channels, oversample_factor, use_Cauchy_likelihood,
+                                       skyline_mask, spatial_mask
                                    ),
                                    jac = grad(cost),
                                    tol=tol,

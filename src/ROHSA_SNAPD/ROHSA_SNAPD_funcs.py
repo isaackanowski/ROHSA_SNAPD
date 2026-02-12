@@ -252,32 +252,75 @@ def kin_maps_to_convolved_cube(flux_mu_sig_param_maps,sigma_LSF_channels,psf_ima
     # return convolved model
     return descaled_convolved_model
 
-def neg_log_Cauchy(model,data,rms_error):
+def neg_log_Cauchy(model,data,rms_error,skyline_mask=None,spatial_mask=None):
     '''
+    A possible L(theta).
+
     The Cauchy likelihood is (pi*rms_error*(1+((data-model)/rms_error)**2)**-1,
     where we use the rms error of the data as the scale factor of the likelihood.
 
-    So to use as the cost function, we take the negative log of this likelihood.
+    So to use as L(theta), we take the negative log of this likelihood.
 
     :param model: The convolved ROHSA-SNAPD model
     :param data: The observed data
     :param rms_error: The observed RMS error
+    :param skyline_mask: A 1D bool array with len(skyline_mask) == n spectral channels, where True is to remove from the L(theta) calculation (or None if no masking).
+    :param spatial_mask: A ravelled bool array which when resized is a 2D map of regions to be masked, where True is to remove from the L(theta) calculation (or None if no masking).
     '''
 
-    return jnp.nansum(jnp.log(rms_error)+jnp.log(1 + (((model - data) / rms_error) ** 2)))
+    if (skyline_mask is None) and (spatial_mask is None):
+        return jnp.nansum(jnp.log(rms_error)+jnp.log(1 + (((model - data) / rms_error) ** 2)))
+    elif (spatial_mask is None):
+        return jnp.nansum(jnp.log(rms_error[~skyline_mask,:,:]) + jnp.log(1 + (((model[~skyline_mask,:,:] - data[~skyline_mask,:,:]) / rms_error[~skyline_mask,:,:]) ** 2)))
+    elif (skyline_mask is None):
+        # must reshape the mask
+        reshaped_spatial_mask = jnp.reshape(spatial_mask, (data.shape[1], data.shape[2]))
+        return jnp.nansum(jnp.log(rms_error[:, ~reshaped_spatial_mask]) + jnp.log(1 + (((model[:, ~reshaped_spatial_mask] - data[:, ~reshaped_spatial_mask]) / rms_error[:, ~reshaped_spatial_mask]) ** 2)))
+    else:
+        # must reshape the mask
+        reshaped_spatial_mask = jnp.reshape(spatial_mask, (data.shape[1], data.shape[2]))
 
-def chi_sqr(model,data,rms_error):
+        # want to spatially nan the cubes
+        nan_rms_error = copy.deepcopy(rms_error)
+        nan_rms_error[:, reshaped_spatial_mask] = float('nan')
+        nan_model = model.at[:, reshaped_spatial_mask].set(float('nan'))
+        nan_data = copy.deepcopy(data)
+        nan_data[:, reshaped_spatial_mask] = float('nan')
+
+        return jnp.nansum(jnp.log(nan_rms_error[~skyline_mask,:,:]) + jnp.log(1 + (((nan_model[~skyline_mask,:,:] - nan_data[~skyline_mask,:,:]) / nan_rms_error[~skyline_mask,:,:]) ** 2)))
+
+def chi_sqr(model,data,rms_error,skyline_mask=None,spatial_mask=None):
     '''
-    A possible cost function.
+    A possible L(theta).
 
     :param model: The convolved ROHSA-SNAPD model
     :param data: The observed data
     :param rms_error: The observed RMS error
-    :return:
+    :param skyline_mask: A 1D bool array with len(skyline_mask) == n spectral channels, where True is to remove from the L(theta) calculation (or None if no masking).
+    :param spatial_mask: A ravelled bool array which when resized is a 2D map of regions to be masked, where True is to remove from the L(theta) calculation (or None if no masking).
     '''
-    return jnp.nansum(((model - data) / rms_error) ** 2)
+    if skyline_mask is None:
+        return jnp.nansum(((model - data) / rms_error) ** 2)
+    elif (spatial_mask is None):
+        return jnp.nansum(((model[~skyline_mask,:,:] - data[~skyline_mask,:,:]) / rms_error[~skyline_mask,:,:]) ** 2)
+    elif (skyline_mask is None):
+        # must reshape the mask
+        reshaped_spatial_mask = jnp.reshape(spatial_mask, (data.shape[1], data.shape[2]))
+        return jnp.nansum(((model[:,~reshaped_spatial_mask] - data[:,~reshaped_spatial_mask]) / rms_error[:,~reshaped_spatial_mask]) ** 2)
+    else:
+        # must reshape the mask
+        reshaped_spatial_mask = jnp.reshape(spatial_mask, (data.shape[1], data.shape[2]))
 
-def cost(params, observed_data, rms, psf_image, lambda_flux, lambda_mu, lambda_sig, kernel,sigma_LSF_channels,oversample_factor,use_Cauchy_likelihood=False):
+        # want to spatially nan the cubes
+        nan_rms_error = copy.deepcopy(rms_error)
+        nan_rms_error[:, reshaped_spatial_mask] = float('nan')
+        nan_model = model.at[:, reshaped_spatial_mask].set(float('nan'))
+        nan_data = copy.deepcopy(data)
+        nan_data[:, reshaped_spatial_mask] = float('nan')
+
+        return jnp.nansum(((nan_model[~skyline_mask,:,:] - nan_data[~skyline_mask,:,:]) / nan_rms_error[~skyline_mask,:,:]) ** 2)
+
+def cost(params, observed_data, rms, psf_image, lambda_flux, lambda_mu, lambda_sig, kernel,sigma_LSF_channels,oversample_factor,use_Cauchy_likelihood=False,skyline_mask=None,spatial_mask=None):
     """
     This is the cost function that is minimised by the gradient descent fit.
     :param params: A raveled array of Gaussian parameters.
@@ -291,6 +334,8 @@ def cost(params, observed_data, rms, psf_image, lambda_flux, lambda_mu, lambda_s
     :param sigma_LSF_channels: The standard deviation of the line spread function (LSF) in units of wavelength channels.
     :param oversample_factor: The factor to oversample the parameter maps to account for sub-pixel velocity gradients.
     :param use_Cauchy_likelihood: Whether to use a negative log Cauchy distribution in the cost function, or if False, chi-sqrd
+    :param skyline_mask: A 1D bool array with len(skyline_mask) == n spectral channels, where True is to remove from the L(theta) calculation (or None if no masking).
+    :param spatial_mask: A ravelled bool array which when resized is a 2D map of regions to be masked, where True is to remove from the L(theta) calculation (or None if no masking).
     :return:
     """
 
@@ -317,9 +362,9 @@ def cost(params, observed_data, rms, psf_image, lambda_flux, lambda_mu, lambda_s
     convolved_model = kin_maps_to_convolved_cube(reshaped_params, sigma_LSF_channels, psf_image, observed_data, oversample_factor)
 
     if use_Cauchy_likelihood:
-        J = neg_log_Cauchy(convolved_model,observed_data,rms)
+        J = neg_log_Cauchy(convolved_model,observed_data,rms,skyline_mask, spatial_mask)
     else:
-        J = chi_sqr(convolved_model,observed_data,rms)
+        J = chi_sqr(convolved_model,observed_data,rms,skyline_mask, spatial_mask)
 
     # this convolves the data with the kernel to enforce smoothness of the solution
     lambda_times_R = 0.
